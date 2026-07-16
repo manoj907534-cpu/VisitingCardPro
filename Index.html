@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visiting Card Scanner & Manager</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; }
+  .fade-in { animation: fadeIn .25s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+  .spinner {
+    border: 3px solid #e5e7eb;
+    border-top: 3px solid #4f46e5;
+    border-radius: 50%;
+    width: 36px; height: 36px;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tab-active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+</style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<!-- ================= CONFIG ================= -->
+<script>
+  const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyqG-bSrSjo8oFQOHAjsNSYinx3RoUoQUm-1X-hC_2lDCI9DhfmEujkofxt8O81SKhJpw/exec";
+</script>
+
+<!-- ================= TOAST ================= -->
+<div id="toast" class="fixed top-5 right-5 z-50 hidden fade-in">
+  <div class="bg-gray-900 text-white px-5 py-3 rounded-lg shadow-lg text-sm" id="toastMsg"></div>
+</div>
+
+<!-- ================= LOGIN MODAL ================= -->
+<div id="loginModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 hidden">
+  <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm fade-in">
+    <h2 class="text-xl font-semibold mb-1 text-gray-800">Sign in</h2>
+    <p class="text-sm text-gray-500 mb-5">Enter your credentials to access the scanner.</p>
+    <input id="loginUsername" type="text" placeholder="Username"
+      class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <input id="loginPassword" type="password" placeholder="Password"
+      class="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <p id="loginError" class="text-red-500 text-sm mb-3 hidden">Incorrect username or password.</p>
+    <button onclick="handleLogin()"
+      class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg transition">
+      Log In
+    </button>
+  </div>
+</div>
+
+<!-- ================= DUPLICATE MODAL ================= -->
+<div id="dupModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 hidden">
+  <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm fade-in">
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">⚠️ Possible duplicate</h3>
+    <p class="text-sm text-gray-600 mb-3">This matches an existing contact by email or phone:</p>
+    <div class="bg-gray-50 rounded-lg p-3 text-sm mb-4">
+      <p id="dupName" class="font-medium"></p>
+      <p id="dupCompany" class="text-gray-500"></p>
+      <p id="dupContact" class="text-gray-500"></p>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="confirmForceSave()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm">Save Anyway</button>
+      <button onclick="skipDuplicate()" class="flex-1 bg-gray-200 hover:bg-gray-300 py-2 rounded-lg text-sm">Skip</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= DELETE CONFIRM MODAL ================= -->
+<div id="deleteModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 hidden">
+  <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm fade-in">
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">Delete contact?</h3>
+    <p class="text-sm text-gray-600 mb-4">This will permanently remove <span id="deleteName" class="font-medium"></span> from your database.</p>
+    <div class="flex gap-2">
+      <button onclick="performDelete()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm">Delete</button>
+      <button onclick="closeDeleteModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 py-2 rounded-lg text-sm">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MAIN APP ================= -->
+<div id="app" class="hidden max-w-4xl mx-auto py-8 px-4">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-2xl font-bold text-gray-800">📇 Card Scanner</h1>
+    <button onclick="handleLogout()" class="text-sm text-gray-500 hover:text-red-500">Logout</button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex gap-6 border-b border-gray-200 mb-6">
+    <button id="tabScanBtn" onclick="switchTab('scan')" class="pb-2 text-gray-500 tab-active">Scan</button>
+    <button id="tabContactsBtn" onclick="switchTab('contacts')" class="pb-2 text-gray-500">Contacts</button>
+  </div>
+
+  <!-- ============ SCAN TAB ============ -->
+  <div id="scanTab">
+
+    <!-- Batch setup -->
+    <div id="batchSetup" class="bg-white rounded-2xl p-6 mb-4">
+      <label class="text-xs text-gray-500">Event / Session tag (optional — applied to every card in this batch)</label>
+      <input id="eventTag" placeholder="e.g. TechConf 2026" class="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+    </div>
+
+    <!-- Upload zone -->
+    <div id="uploadState">
+      <div id="dropZone"
+        class="border-2 border-dashed border-indigo-300 rounded-2xl bg-white p-10 text-center cursor-pointer hover:bg-indigo-50 transition">
+        <p class="text-gray-600 mb-2">Drag & drop one or more business card images</p>
+        <p class="text-gray-400 text-sm mb-4">or</p>
+        <div class="flex justify-center gap-3">
+          <label class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg cursor-pointer text-sm">
+            Choose Files
+            <input id="fileInput" type="file" accept="image/*" multiple class="hidden">
+          </label>
+          <button onclick="startCamera()" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg text-sm">
+            Use Camera
+          </button>
+        </div>
+      </div>
+
+      <!-- Camera view -->
+      <div id="cameraView" class="hidden mt-4 bg-white rounded-2xl p-4 text-center">
+        <video id="video" autoplay playsinline class="w-full rounded-lg mb-3"></video>
+        <p class="text-xs text-gray-400 mb-2">Capture as many cards as you like, then tap Done</p>
+        <button onclick="capturePhoto()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm">
+          Capture (<span id="capturedCount">0</span>)
+        </button>
+        <button onclick="finishCamera()" class="ml-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm">
+          Done
+        </button>
+        <button onclick="stopCamera()" class="ml-2 bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">
+          Cancel
+        </button>
+        <canvas id="canvas" class="hidden"></canvas>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="loadingState" class="hidden bg-white rounded-2xl p-10 text-center fade-in">
+      <div class="spinner mx-auto mb-4"></div>
+      <p class="text-gray-600">Google Cloud OCR processing your card...</p>
+      <p id="queueProgress" class="text-gray-400 text-sm mt-1"></p>
+    </div>
+
+    <!-- Review state -->
+    <div id="reviewState" class="hidden fade-in">
+      <p id="reviewProgress" class="text-sm text-gray-500 mb-2"></p>
+      <div class="bg-white rounded-2xl p-6 grid md:grid-cols-2 gap-6">
+        <div>
+          <img id="previewImg" class="w-full rounded-lg border border-gray-200" alt="Card preview">
+        </div>
+        <div class="space-y-3">
+          <div><label class="text-xs text-gray-500">Full Name</label>
+            <input id="fullName" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Job Title</label>
+            <input id="jobTitle" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Company</label>
+            <input id="company" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Email</label>
+            <input id="email" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Phone</label>
+            <input id="phone" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Website</label>
+            <input id="website" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Address</label>
+            <input id="address" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div class="flex gap-2 pt-2">
+            <button onclick="submitEntry()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium">
+              Save & Continue
+            </button>
+            <button onclick="skipCurrentCard()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">
+              Skip
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Batch complete -->
+    <div id="batchDoneState" class="hidden bg-white rounded-2xl p-10 text-center fade-in">
+      <p class="text-2xl mb-2">✅</p>
+      <p class="text-gray-700 font-medium">All cards in this batch processed.</p>
+      <button onclick="resetToUpload()" class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm">
+        Scan Another Batch
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ CONTACTS TAB ============ -->
+  <div id="contactsTab" class="hidden">
+    <div class="bg-white rounded-2xl p-4 mb-4 flex flex-col sm:flex-row gap-3 sm:items-center">
+      <input id="searchBox" oninput="renderContacts()" placeholder="Search name, company, email, event..."
+        class="flex-1 border rounded-lg px-3 py-2 text-sm">
+      <select id="eventFilter" onchange="renderContacts()" class="border rounded-lg px-3 py-2 text-sm">
+        <option value="">All events</option>
+      </select>
+      <div class="flex gap-2">
+        <button onclick="exportCSV()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-sm">Export CSV</button>
+        <button onclick="exportVCard()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-sm">Export vCard</button>
+        <button onclick="loadContacts()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm">Refresh</button>
+      </div>
+    </div>
+
+    <div id="contactsList" class="grid gap-3"></div>
+    <div id="contactsEmpty" class="hidden text-center text-gray-400 py-10">No contacts found.</div>
+  </div>
+
+  <!-- ============ EDIT CONTACT MODAL ============ -->
+  <div id="editModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 hidden p-4">
+    <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-2xl fade-in max-h-[90vh] overflow-y-auto">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">Edit Contact</h3>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div>
+          <img id="editPreviewImg" class="w-full rounded-lg border border-gray-200" alt="Card">
+        </div>
+        <div class="space-y-3">
+          <div><label class="text-xs text-gray-500">Full Name</label>
+            <input id="editFullName" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Job Title</label>
+            <input id="editJobTitle" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Company</label>
+            <input id="editCompany" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Email</label>
+            <input id="editEmail" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Phone</label>
+            <input id="editPhone" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Website</label>
+            <input id="editWebsite" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Address</label>
+            <input id="editAddress" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-gray-500">Event</label>
+            <input id="editEvent" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div class="flex gap-2 pt-2">
+            <button onclick="saveEdit()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium">Save Changes</button>
+            <button onclick="closeEditModal()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------- STATE ----------------
+let cameraStream = null;
+let captureBuffer = [];       // base64 images captured/selected before queue starts
+let processQueue = [];        // { imageBase64, rawText, imageUrl } items pending review
+let currentQueueIndex = 0;
+let currentSavePayload = null; // last field set pending duplicate resolution
+let allContacts = [];
+let editingId = null;
+
+// ---------------- LOGIN ----------------
+function checkLoginOnLoad() {
+  const creds = getCreds();
+  if (creds) showApp(); else document.getElementById("loginModal").classList.remove("hidden");
+}
+function getCreds() {
+  const raw = localStorage.getItem("cardScannerCreds");
+  return raw ? JSON.parse(raw) : null;
+}
+function handleLogin() {
+  const username = document.getElementById("loginUsername").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  if (!username || !password) return;
+  localStorage.setItem("cardScannerCreds", JSON.stringify({ username, password }));
+  document.getElementById("loginError").classList.add("hidden");
+  document.getElementById("loginModal").classList.add("hidden");
+  showApp();
+}
+function handleLogout() {
+  localStorage.removeItem("cardScannerCreds");
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("loginModal").classList.remove("hidden");
+}
+function showApp() {
+  document.getElementById("app").classList.remove("hidden");
+  switchTab("scan");
+  resetToUpload();
+}
+function showLoginError() {
+  document.getElementById("loginModal").classList.remove("hidden");
+  document.getElementById("loginError").classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
+}
+
+// ---------------- TABS ----------------
+function switchTab(tab) {
+  document.getElementById("scanTab").classList.toggle("hidden", tab !== "scan");
+  document.getElementById("contactsTab").classList.toggle("hidden", tab !== "contacts");
+  document.getElementById("tabScanBtn").classList.toggle("tab-active", tab === "scan");
+  document.getElementById("tabContactsBtn").classList.toggle("tab-active", tab === "contacts");
+  if (tab === "contacts") loadContacts();
+}
+
+// ---------------- TOAST ----------------
+function showToast(msg) {
+  const toast = document.getElementById("toast");
+  document.getElementById("toastMsg").textContent = msg;
+  toast.classList.remove("hidden");
+  setTimeout(() => toast.classList.add("hidden"), 3000);
+}
+
+// ---------------- SCAN STATE SWITCHING ----------------
+function resetToUpload() {
+  document.getElementById("batchSetup").classList.remove("hidden");
+  document.getElementById("uploadState").classList.remove("hidden");
+  document.getElementById("loadingState").classList.add("hidden");
+  document.getElementById("reviewState").classList.add("hidden");
+  document.getElementById("batchDoneState").classList.add("hidden");
+  stopCamera();
+  captureBuffer = [];
+  processQueue = [];
+  currentQueueIndex = 0;
+}
+
+// ---------------- FILE / DRAG-DROP (supports multiple) ----------------
+const dropZone = document.getElementById("dropZone");
+const fileInput = document.getElementById("fileInput");
+dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("bg-indigo-50"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("bg-indigo-50"));
+dropZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropZone.classList.remove("bg-indigo-50");
+  if (e.dataTransfer.files.length) handleFiles(Array.from(e.dataTransfer.files));
+});
+fileInput.addEventListener("change", (e) => {
+  if (e.target.files.length) handleFiles(Array.from(e.target.files));
+});
+
+function handleFiles(files) {
+  let loaded = 0;
+  const results = new Array(files.length);
+  files.forEach((file, idx) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      results[idx] = reader.result;
+      loaded++;
+      if (loaded === files.length) startBatch(results);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ---------------- CAMERA (supports multiple captures) ----------------
+async function startCamera() {
+  document.getElementById("cameraView").classList.remove("hidden");
+  captureBuffer = [];
+  document.getElementById("capturedCount").textContent = "0";
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    document.getElementById("video").srcObject = cameraStream;
+  } catch (err) {
+    showToast("Camera access denied or unavailable.");
+    document.getElementById("cameraView").classList.add("hidden");
+  }
+}
+function stopCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  document.getElementById("cameraView").classList.add("hidden");
+}
+function capturePhoto() {
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  captureBuffer.push(canvas.toDataURL("image/jpeg", 0.9));
+  document.getElementById("capturedCount").textContent = captureBuffer.length;
+}
+function finishCamera() {
+  if (captureBuffer.length === 0) { showToast("Capture at least one card first."); return; }
+  const images = captureBuffer.slice();
+  stopCamera();
+  startBatch(images);
+}
+
+// ---------------- BATCH QUEUE PROCESSING ----------------
+function startBatch(base64Images) {
+  processQueue = base64Images.map(img => ({ imageBase64: img }));
+  currentQueueIndex = 0;
+  document.getElementById("batchSetup").classList.add("hidden");
+  document.getElementById("uploadState").classList.add("hidden");
+  processNextInQueue();
+}
+
+function processNextInQueue() {
+  if (currentQueueIndex >= processQueue.length) {
+    document.getElementById("loadingState").classList.add("hidden");
+    document.getElementById("reviewState").classList.add("hidden");
+    document.getElementById("batchDoneState").classList.remove("hidden");
+    return;
+  }
+  document.getElementById("reviewState").classList.add("hidden");
+  document.getElementById("loadingState").classList.remove("hidden");
+  document.getElementById("queueProgress").textContent =
+    "Card " + (currentQueueIndex + 1) + " of " + processQueue.length;
+
+  const item = processQueue[currentQueueIndex];
+  const creds = getCreds();
+
+  fetch(GAS_WEB_APP_URL, {
+    method: "POST",
+    body: JSON.stringify({
+      action: "process_image",
+      username: creds.username,
+      password: creds.password,
+      imageBase64: item.imageBase64,
+      mimeType: "image/jpeg"
+    })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.authError) { showLoginError(); return; }
+      if (!data.success) {
+        showToast(data.error || "Something went wrong on card " + (currentQueueIndex + 1) + ".");
+        currentQueueIndex++;
+        processNextInQueue();
+        return;
+      }
+      item.rawText = data.rawText;
+      item.imageUrl = data.imageUrl;
+      populateReview(item);
+    })
+    .catch(() => {
+      showToast("Network error on card " + (currentQueueIndex + 1) + ".");
+      currentQueueIndex++;
+      processNextInQueue();
+    });
+}
+
+function skipCurrentCard() {
+  currentQueueIndex++;
+  processNextInQueue();
+}
+
+// ---------------- REGEX SMART PARSER ----------------
+function parseCardText(text) {
+  const result = { email: "", phone: "", website: "", fullName: "", jobTitle: "", company: "", address: "" };
+  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  if (emailMatch) result.email = emailMatch[0];
+  const phoneMatch = text.match(/(\+?\d[\d\-\.\s\(\)]{7,}\d)/);
+  if (phoneMatch) result.phone = phoneMatch[0].trim();
+  const websiteMatch = text.match(/((https?:\/\/)?(www\.)?[a-zA-Z0-9-]+\.(com|net|org|io|co)(\/[^\s]*)?)/i);
+  if (websiteMatch && !websiteMatch[0].includes("@")) result.website = websiteMatch[0];
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  if (lines.length > 0) result.fullName = lines[0];
+  if (lines.length > 1) result.jobTitle = lines[1];
+  if (lines.length > 2) result.company = lines[2];
+  const addressLine = lines.find(l => /\d{1,5}\s+\w+/.test(l) && l !== result.fullName);
+  if (addressLine) result.address = addressLine;
+  return result;
+}
+
+function populateReview(item) {
+  document.getElementById("loadingState").classList.add("hidden");
+  document.getElementById("reviewState").classList.remove("hidden");
+  document.getElementById("reviewProgress").textContent =
+    "Reviewing card " + (currentQueueIndex + 1) + " of " + processQueue.length;
+  document.getElementById("previewImg").src = item.imageUrl;
+
+  const parsed = parseCardText(item.rawText || "");
+  document.getElementById("fullName").value = parsed.fullName;
+  document.getElementById("jobTitle").value = parsed.jobTitle;
+  document.getElementById("company").value = parsed.company;
+  document.getElementById("email").value = parsed.email;
+  document.getElementById("phone").value = parsed.phone;
+  document.getElementById("website").value = parsed.website;
+  document.getElementById("address").value = parsed.address;
+}
+
+// ---------------- SUBMIT (with duplicate check) ----------------
+function submitEntry(forceSave) {
+  const creds = getCreds();
+  const item = processQueue[currentQueueIndex];
+  const fields = {
+    fullName: document.getElementById("fullName").value,
+    jobTitle: document.getElementById("jobTitle").value,
+    company: document.getElementById("company").value,
+    email: document.getElementById("email").value,
+    phone: document.getElementById("phone").value,
+    website: document.getElementById("website").value,
+    address: document.getElementById("address").value,
+    event: document.getElementById("eventTag").value,
+    imageUrl: item.imageUrl
+  };
+
+  currentSavePayload = fields;
+
+  fetch(GAS_WEB_APP_URL, {
+    method: "POST",
+    body: JSON.stringify({
+      action: "save_entry",
+      username: creds.username,
+      password: creds.password,
+      fields: fields,
+      forceSave: !!forceSave
+    })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.authError) { showLoginError(); return; }
+      if (data.duplicate) {
+        showDuplicateModal(data.existing);
+        return;
+      }
+      if (data.success) {
+        showToast("Contact saved!");
+        currentQueueIndex++;
+        processNextInQueue();
+      } else {
+        showToast(data.error || "Could not save entry.");
+      }
+    })
+    .catch(() => showToast("Network error. Please try again."));
+}
+
+function showDuplicateModal(existing) {
+  document.getElementById("dupName").textContent = existing.fullName || "(no name)";
+  document.getElementById("dupCompany").textContent = existing.company || "";
+  document.getElementById("dupContact").textContent = [existing.email, existing.phone].filter(Boolean).join(" · ");
+  document.getElementById("dupModal").classList.remove("hidden");
+}
+function confirmForceSave() {
+  document.getElementById("dupModal").classList.add("hidden");
+  if (editingId) {
+    saveEdit(true);
+  } else {
+    submitEntry(true);
+  }
+}
+function skipDuplicate() {
+  document.getElementById("dupModal").classList.add("hidden");
+  if (editingId) {
+    closeEditModal();
+  } else {
+    currentQueueIndex++;
+    processNextInQueue();
+  }
+}
+
+// ---------------- CONTACTS TAB ----------------
+function loadContacts() {
+  const creds = getCreds();
+  fetch(GAS_WEB_APP_URL, {
+    method: "POST",
+    body: JSON.stringify({ action: "get_entries", username: creds.username, password: creds.password })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.authError) { showLoginError(); return; }
+      if (!data.success) { showToast(data.error || "Could not load contacts."); return; }
+      allContacts = data.entries || [];
+      populateEventFilter();
+      renderContacts();
+    })
+    .catch(() => showToast("Network error loading contacts."));
+}
+
+function populateEventFilter() {
+  const select = document.getElementById("eventFilter");
+  const current = select.value;
+  const events = Array.from(new Set(allContacts.map(c => c.event).filter(Boolean))).sort();
+  select.innerHTML = '<option value="">All events</option>' +
+    events.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join("");
+  select.value = current;
+}
+
+function renderContacts() {
+  const query = document.getElementById("searchBox").value.toLowerCase();
+  const eventFilter = document.getElementById("eventFilter").value;
+
+  const filtered = allContacts.filter(c => {
+    const matchesQuery = !query || [c.fullName, c.company, c.email, c.event, c.jobTitle]
+      .some(v => (v || "").toString().toLowerCase().includes(query));
+    const matchesEvent = !eventFilter || c.event === eventFilter;
+    return matchesQuery && matchesEvent;
+  });
+
+  const list = document.getElementById("contactsList");
+  const empty = document.getElementById("contactsEmpty");
+
+  if (filtered.length === 0) {
+    list.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  list.innerHTML = filtered.map(c => `
+    <div class="bg-white rounded-2xl p-4 flex gap-4 items-center">
+      <img src="${escapeHtml(c.imageUrl)}" class="w-16 h-16 object-cover rounded-lg border border-gray-200 flex-shrink-0" alt="Card">
+      <div class="flex-1 min-w-0">
+        <p class="font-medium text-gray-800 truncate">${escapeHtml(c.fullName || "(No name)")}</p>
+        <p class="text-sm text-gray-500 truncate">${escapeHtml([c.jobTitle, c.company].filter(Boolean).join(" · "))}</p>
+        <p class="text-xs text-gray-400 truncate">${escapeHtml([c.email, c.phone].filter(Boolean).join(" · "))}</p>
+        ${c.event ? `<span class="inline-block mt-1 text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">${escapeHtml(c.event)}</span>` : ""}
+      </div>
+      <div class="flex flex-col gap-1">
+        <button onclick="openEditModal('${c.id}')" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg">Edit</button>
+        <button onclick="openDeleteModal('${c.id}')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg">Delete</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function escapeHtml(str) {
+  return (str || "").toString()
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// ---------------- EDIT ----------------
+function openEditModal(id) {
+  const c = allContacts.find(x => x.id === id);
+  if (!c) return;
+  editingId = id;
+  document.getElementById("editPreviewImg").src = c.imageUrl;
+  document.getElementById("editFullName").value = c.fullName || "";
+  document.getElementById("editJobTitle").value = c.jobTitle || "";
+  document.getElementById("editCompany").value = c.company || "";
+  document.getElementById("editEmail").value = c.email || "";
+  document.getElementById("editPhone").value = c.phone || "";
+  document.getElementById("editWebsite").value = c.website || "";
+  document.getElementById("editAddress").value = c.address || "";
+  document.getElementById("editEvent").value = c.event || "";
+  document.getElementById("editModal").classList.remove("hidden");
+}
+function closeEditModal() {
+  document.getElementById("editModal").classList.add("hidden");
+  editingId = null;
+}
+function saveEdit(forceSave) {
+  const creds = getCreds();
+  const fields = {
+    fullName: document.getElementById("editFullName").value,
+    jobTitle: document.getElementById("editJobTitle").value,
+    company: document.getElementById("editCompany").value,
+    email: document.getElementById("editEmail").value,
+    phone: document.getElementById("editPhone").value,
+    website: document.getElementById("editWebsite").value,
+    address: document.getElementById("editAddress").value,
+    event: document.getElementById("editEvent").value
+  };
+
+  fetch(GAS_WEB_APP_URL, {
+    method: "POST",
+    body: JSON.stringify({
+      action: "update_entry",
+      username: creds.username,
+      password: creds.password,
+      id: editingId,
+      fields: fields,
+      forceSave: !!forceSave
+    })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.authError) { showLoginError(); return; }
+      if (data.duplicate) { showDuplicateModal(data.existing); return; }
+      if (data.success) {
+        showToast("Contact updated!");
+        closeEditModal();
+        loadContacts();
+      } else {
+        showToast(data.error || "Could not update entry.");
+      }
+    })
+    .catch(() => showToast("Network error. Please try again."));
+}
+
+// ---------------- DELETE ----------------
+let pendingDeleteId = null;
+function openDeleteModal(id) {
+  const c = allContacts.find(x => x.id === id);
+  pendingDeleteId = id;
+  document.getElementById("deleteName").textContent = (c && c.fullName) || "this contact";
+  document.getElementById("deleteModal").classList.remove("hidden");
+}
+function closeDeleteModal() {
+  document.getElementById("deleteModal").classList.add("hidden");
+  pendingDeleteId = null;
+}
+function performDelete() {
+  const creds = getCreds();
+  fetch(GAS_WEB_APP_URL, {
+    method: "POST",
+    body: JSON.stringify({ action: "delete_entry", username: creds.username, password: creds.password, id: pendingDeleteId })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.authError) { showLoginError(); return; }
+      closeDeleteModal();
+      if (data.success) {
+        showToast("Contact deleted.");
+        loadContacts();
+      } else {
+        showToast(data.error || "Could not delete entry.");
+      }
+    })
+    .catch(() => showToast("Network error. Please try again."));
+}
+
+// ---------------- EXPORT ----------------
+function getFilteredContacts() {
+  const query = document.getElementById("searchBox").value.toLowerCase();
+  const eventFilter = document.getElementById("eventFilter").value;
+  return allContacts.filter(c => {
+    const matchesQuery = !query || [c.fullName, c.company, c.email, c.event, c.jobTitle]
+      .some(v => (v || "").toString().toLowerCase().includes(query));
+    const matchesEvent = !eventFilter || c.event === eventFilter;
+    return matchesQuery && matchesEvent;
+  });
+}
+
+function downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(v) {
+  const s = (v || "").toString();
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportCSV() {
+  const rows = getFilteredContacts();
+  if (rows.length === 0) { showToast("No contacts to export."); return; }
+  const headers = ["Full Name","Job Title","Company","Email","Phone","Website","Address","Event","Image Link"];
+  const lines = [headers.join(",")];
+  rows.forEach(c => {
+    lines.push([c.fullName,c.jobTitle,c.company,c.email,c.phone,c.website,c.address,c.event,c.imageUrl].map(csvEscape).join(","));
+  });
+  downloadBlob(lines.join("\n"), "contacts.csv", "text/csv");
+}
+
+function exportVCard() {
+  const rows = getFilteredContacts();
+  if (rows.length === 0) { showToast("No contacts to export."); return; }
+  const cards = rows.map(c => [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:" + (c.fullName || ""),
+    "ORG:" + (c.company || ""),
+    "TITLE:" + (c.jobTitle || ""),
+    c.email ? "EMAIL:" + c.email : "",
+    c.phone ? "TEL:" + c.phone : "",
+    c.website ? "URL:" + c.website : "",
+    c.address ? "ADR:;;" + c.address.replace(/,/g, "\\,") + ";;;;" : "",
+    "END:VCARD"
+  ].filter(Boolean).join("\n")).join("\n");
+  downloadBlob(cards, "contacts.vcf", "text/vcard");
+}
+
+// ---------------- INIT ----------------
+checkLoginOnLoad();
+</script>
+</body>
+</html>
