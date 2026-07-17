@@ -24,7 +24,8 @@
 
 <!-- ================= CONFIG ================= -->
 <script>
-  const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyd3p-Id3OdFJ9jCPISMDNXG_PU8PEBALTTlR7OgC_BhPRcxe60BMF9wW02RONBxgKiYA/exec";
+  const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbydqPLkPHlmduUHbwyQ3XBtckqf6CVjM1g8p0QxDTpDAA0mGdRNFKMZFCeuo-TuTSpxEQ/exec";
+  const HTML_VERSION = "2026-07-17-v5"; // bump this each time you push index.html
 </script>
 
 <!-- ================= TOAST ================= -->
@@ -80,10 +81,14 @@
 
 <!-- ================= MAIN APP ================= -->
 <div id="app" class="hidden max-w-4xl mx-auto py-8 px-4">
-  <div class="flex items-center justify-between mb-4">
+  <div class="flex items-center justify-between mb-1">
     <h1 class="text-2xl font-bold text-gray-800">📇 Card Scanner</h1>
-    <button onclick="handleLogout()" class="text-sm text-gray-500 hover:text-red-500">Logout</button>
+    <div class="text-right">
+      <button onclick="handleLogout()" class="text-sm text-gray-500 hover:text-red-500 block">Logout</button>
+      <p id="versionInfo" class="text-[10px] text-gray-300 mt-1"></p>
+    </div>
   </div>
+  <div class="mb-3"></div>
 
   <!-- Tabs -->
   <div class="flex gap-6 border-b border-gray-200 mb-6">
@@ -93,6 +98,9 @@
 
   <!-- ============ SCAN TAB ============ -->
   <div id="scanTab">
+
+    <!-- Gemini usage badge -->
+    <div id="usageBadge" class="hidden mb-4 text-xs px-4 py-2 rounded-lg"></div>
 
     <!-- Batch setup -->
     <div id="batchSetup" class="bg-white rounded-2xl p-6 mb-4">
@@ -305,6 +313,49 @@ function showApp() {
   document.getElementById("app").classList.remove("hidden");
   switchTab("scan");
   resetToUpload();
+  refreshUsageAndVersion();
+}
+
+function refreshUsageAndVersion() {
+  const creds = getCreds();
+  if (!creds) return;
+  fetch(GAS_WEB_APP_URL, {
+    method: "POST",
+    body: JSON.stringify({ action: "get_usage", username: creds.username, password: creds.password })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.authError) return;
+      renderVersionInfo(data.scriptVersion, data.appVersion);
+      if (data.success) renderUsageBadge(data);
+    })
+    .catch(() => {});
+}
+
+function renderVersionInfo(scriptVersion, appVersion) {
+  const parts = [];
+  if (appVersion) parts.push("App v" + appVersion);
+  parts.push("HTML " + HTML_VERSION);
+  if (scriptVersion) parts.push("Script " + scriptVersion);
+  document.getElementById("versionInfo").textContent = parts.join(" · ");
+}
+
+function renderUsageBadge(usage) {
+  const badge = document.getElementById("usageBadge");
+  if (!usage.geminiEnabled) {
+    badge.classList.add("hidden");
+    return;
+  }
+  badge.classList.remove("hidden");
+  if (usage.quotaReached) {
+    badge.className = "mb-4 text-xs px-4 py-2 rounded-lg bg-amber-50 text-amber-700";
+    badge.textContent = "⚠️ Gemini daily limit reached (" + usage.used + "/" + usage.limit +
+      ") — new scans will automatically use free Drive OCR until it resets tomorrow.";
+  } else {
+    badge.className = "mb-4 text-xs px-4 py-2 rounded-lg bg-indigo-50 text-indigo-700";
+    badge.textContent = "Gemini smart scan: " + usage.used + " / " + usage.limit + " used today (" +
+      usage.remaining + " remaining)";
+  }
 }
 function showLoginError() {
   document.getElementById("loginModal").classList.remove("hidden");
@@ -448,6 +499,9 @@ function processNextInQueue() {
         return;
       }
       item.rawText = data.rawText;
+      item.parsedFields = data.parsedFields || null;
+      item.engineUsed = data.engineUsed || null;
+      if (data.usage) renderUsageBadge(data.usage);
       item.imageUrl = data.imageUrl;
       populateReview(item);
     })
@@ -534,18 +588,22 @@ function parseCardText(text) {
 function populateReview(item) {
   document.getElementById("loadingState").classList.add("hidden");
   document.getElementById("reviewState").classList.remove("hidden");
+  const engineLabel = item.engineUsed === "gemini" ? " · Gemini smart scan" :
+    item.engineUsed === "drive_ocr" ? " · Drive OCR (fallback)" : "";
   document.getElementById("reviewProgress").textContent =
-    "Reviewing card " + (currentQueueIndex + 1) + " of " + processQueue.length;
+    "Reviewing card " + (currentQueueIndex + 1) + " of " + processQueue.length + engineLabel;
   document.getElementById("previewImg").src = item.imageUrl;
 
-  const parsed = parseCardText(item.rawText || "");
-  document.getElementById("fullName").value = parsed.fullName;
-  document.getElementById("jobTitle").value = parsed.jobTitle;
-  document.getElementById("company").value = parsed.company;
-  document.getElementById("email").value = parsed.email;
-  document.getElementById("phone").value = parsed.phone;
-  document.getElementById("website").value = parsed.website;
-  document.getElementById("address").value = parsed.address;
+  // Prefer Gemini's structured fields (much more accurate) when the backend
+  // provided them; otherwise fall back to the regex parser on raw OCR text.
+  const parsed = item.parsedFields || parseCardText(item.rawText || "");
+  document.getElementById("fullName").value = parsed.fullName || "";
+  document.getElementById("jobTitle").value = parsed.jobTitle || "";
+  document.getElementById("company").value = parsed.company || "";
+  document.getElementById("email").value = parsed.email || "";
+  document.getElementById("phone").value = parsed.phone || "";
+  document.getElementById("website").value = parsed.website || "";
+  document.getElementById("address").value = parsed.address || "";
 }
 
 // ---------------- SUBMIT (with duplicate check) ----------------
