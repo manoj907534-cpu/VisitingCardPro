@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#4f46e5">
 <title>Visiting Card Scanner & Manager</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
@@ -18,6 +22,16 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .tab-active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+
+  /* Mobile fixes */
+  @media (max-width: 640px) {
+    /* iOS Safari auto-zooms the page when focusing any input under 16px —
+       this is the #1 cause of "feels broken" on mobile. Force 16px here
+       regardless of the text-sm utility class used for visual sizing. */
+    input, select, textarea { font-size: 16px !important; }
+  }
+  /* Comfortable tap targets on touch devices */
+  button, .cursor-pointer { -webkit-tap-highlight-color: rgba(79, 70, 229, 0.15); }
 </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -25,7 +39,7 @@
 <!-- ================= CONFIG ================= -->
 <script>
   const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbydqPLkPHlmduUHbwyQ3XBtckqf6CVjM1g8p0QxDTpDAA0mGdRNFKMZFCeuo-TuTSpxEQ/exec";
-  const HTML_VERSION = "2026-07-17-v5"; // bump this each time you push index.html
+  const HTML_VERSION = "2026-07-17-v6"; // bump this each time you push index.html
 </script>
 
 <!-- ================= TOAST ================= -->
@@ -81,10 +95,10 @@
 
 <!-- ================= MAIN APP ================= -->
 <div id="app" class="hidden max-w-4xl mx-auto py-8 px-4">
-  <div class="flex items-center justify-between mb-1">
-    <h1 class="text-2xl font-bold text-gray-800">📇 Card Scanner</h1>
+  <div class="flex items-start justify-between gap-2 mb-1 flex-wrap">
+    <h1 class="text-xl sm:text-2xl font-bold text-gray-800">📇 Card Scanner</h1>
     <div class="text-right">
-      <button onclick="handleLogout()" class="text-sm text-gray-500 hover:text-red-500 block">Logout</button>
+      <button onclick="handleLogout()" class="text-sm text-gray-500 hover:text-red-500 block ml-auto">Logout</button>
       <p id="versionInfo" class="text-[10px] text-gray-300 mt-1"></p>
     </div>
   </div>
@@ -129,15 +143,17 @@
       <div id="cameraView" class="hidden mt-4 bg-white rounded-2xl p-4 text-center">
         <video id="video" autoplay playsinline class="w-full rounded-lg mb-3"></video>
         <p class="text-xs text-gray-400 mb-2">Capture as many cards as you like, then tap Done</p>
-        <button onclick="capturePhoto()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm">
-          Capture (<span id="capturedCount">0</span>)
-        </button>
-        <button onclick="finishCamera()" class="ml-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm">
-          Done
-        </button>
-        <button onclick="stopCamera()" class="ml-2 bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">
-          Cancel
-        </button>
+        <div class="flex flex-wrap justify-center gap-2">
+          <button onclick="capturePhoto()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm">
+            Capture (<span id="capturedCount">0</span>)
+          </button>
+          <button onclick="finishCamera()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm">
+            Done
+          </button>
+          <button onclick="stopCamera()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">
+            Cancel
+          </button>
+        </div>
         <canvas id="canvas" class="hidden"></canvas>
       </div>
     </div>
@@ -164,11 +180,11 @@
           <div><label class="text-xs text-gray-500">Company</label>
             <input id="company" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Email</label>
-            <input id="email" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+            <input id="email" type="email" inputmode="email" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Phone</label>
-            <input id="phone" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+            <input id="phone" type="tel" inputmode="tel" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Website</label>
-            <input id="website" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+            <input id="website" type="url" inputmode="url" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Address</label>
             <input id="address" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div class="flex gap-2 pt-2">
@@ -195,16 +211,18 @@
 
   <!-- ============ CONTACTS TAB ============ -->
   <div id="contactsTab" class="hidden">
-    <div class="bg-white rounded-2xl p-4 mb-4 flex flex-col sm:flex-row gap-3 sm:items-center">
+    <div class="bg-white rounded-2xl p-4 mb-4 flex flex-col gap-3">
       <input id="searchBox" oninput="renderContacts()" placeholder="Search name, company, email, event..."
-        class="flex-1 border rounded-lg px-3 py-2 text-sm">
-      <select id="eventFilter" onchange="renderContacts()" class="border rounded-lg px-3 py-2 text-sm">
-        <option value="">All events</option>
-      </select>
-      <div class="flex gap-2">
-        <button onclick="exportCSV()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-sm">Export CSV</button>
-        <button onclick="exportVCard()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-sm">Export vCard</button>
-        <button onclick="loadContacts()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm">Refresh</button>
+        class="w-full border rounded-lg px-3 py-2 text-sm">
+      <div class="flex flex-col sm:flex-row gap-2">
+        <select id="eventFilter" onchange="renderContacts()" class="border rounded-lg px-3 py-2 text-sm w-full sm:w-auto">
+          <option value="">All events</option>
+        </select>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="exportCSV()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-sm">Export CSV</button>
+          <button onclick="exportVCard()" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-sm">Export vCard</button>
+          <button onclick="loadContacts()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm">Refresh</button>
+        </div>
       </div>
     </div>
 
@@ -257,11 +275,11 @@
           <div><label class="text-xs text-gray-500">Company</label>
             <input id="editCompany" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Email</label>
-            <input id="editEmail" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+            <input id="editEmail" type="email" inputmode="email" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Phone</label>
-            <input id="editPhone" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+            <input id="editPhone" type="tel" inputmode="tel" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Website</label>
-            <input id="editWebsite" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+            <input id="editWebsite" type="url" inputmode="url" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Address</label>
             <input id="editAddress" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div><label class="text-xs text-gray-500">Event</label>
