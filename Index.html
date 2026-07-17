@@ -204,6 +204,35 @@
     <div id="contactsEmpty" class="hidden text-center text-gray-400 py-10">No contacts found.</div>
   </div>
 
+  <!-- ============ VIEW CONTACT MODAL ============ -->
+  <div id="viewModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 hidden p-4">
+    <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-2xl fade-in max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-800">Contact Details</h3>
+        <button onclick="closeViewModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div>
+          <img id="viewImg" class="w-full rounded-lg border border-gray-200" alt="Card">
+        </div>
+        <div class="space-y-3 text-sm">
+          <div><p class="text-xs text-gray-400">Full Name</p><p id="viewFullName" class="text-gray-800 font-medium"></p></div>
+          <div><p class="text-xs text-gray-400">Job Title</p><p id="viewJobTitle" class="text-gray-800"></p></div>
+          <div><p class="text-xs text-gray-400">Company</p><p id="viewCompany" class="text-gray-800"></p></div>
+          <div><p class="text-xs text-gray-400">Email</p><p id="viewEmail" class="text-gray-800"></p></div>
+          <div><p class="text-xs text-gray-400">Phone</p><p id="viewPhone" class="text-gray-800"></p></div>
+          <div><p class="text-xs text-gray-400">Website</p><p id="viewWebsite" class="text-gray-800"></p></div>
+          <div><p class="text-xs text-gray-400">Address</p><p id="viewAddress" class="text-gray-800"></p></div>
+          <div><p class="text-xs text-gray-400">Event</p><p id="viewEvent" class="text-gray-800"></p></div>
+          <div class="flex gap-2 pt-2">
+            <button onclick="editFromView()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium">Edit</button>
+            <button onclick="closeViewModal()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-lg text-sm">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ EDIT CONTACT MODAL ============ -->
   <div id="editModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-40 hidden p-4">
     <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-2xl fade-in max-h-[90vh] overflow-y-auto">
@@ -434,21 +463,71 @@ function skipCurrentCard() {
   processNextInQueue();
 }
 
-// ---------------- REGEX SMART PARSER ----------------
+// ---------------- SMART PARSER ----------------
+// Classifies each OCR line by content/keywords rather than assuming a fixed
+// line order, since real card layouts vary a lot.
+const JOB_TITLE_KEYWORDS = [
+  "ceo","cto","cfo","coo","president","vice president","vp ","director",
+  "manager","founder","co-founder","owner","partner","principal","head of",
+  "engineer","developer","designer","consultant","specialist","executive",
+  "sales","marketing","analyst","architect","lead","officer","representative",
+  "coordinator","supervisor","administrator","associate","assistant"
+];
+const COMPANY_SUFFIXES = [
+  "inc","llc","ltd","corp","corporation","co.","company","group","technologies",
+  "technology","solutions","systems","services","enterprises","industries",
+  "consulting","partners","associates","studio","labs","ventures","pvt","limited"
+];
+const ADDRESS_KEYWORDS = [
+  "street","st.","road","rd.","avenue","ave","blvd","boulevard","suite","floor",
+  "building","block","sector","lane","drive","dr.","zip","pincode"
+];
+
+function classifyLine(line) {
+  const lower = line.toLowerCase();
+  if (JOB_TITLE_KEYWORDS.some(k => lower.includes(k))) return "jobTitle";
+  if (COMPANY_SUFFIXES.some(k => new RegExp("\\b" + k.replace(".", "\\.") + "\\b").test(lower))) return "company";
+  if (ADDRESS_KEYWORDS.some(k => lower.includes(k)) || /\d{1,5}\s+\w+.*\d{3,}/.test(line)) return "address";
+  if (/^[A-Z][a-zA-Z.'-]+(\s+[A-Z][a-zA-Z.'-]+){1,3}$/.test(line.trim()) && line.split(" ").length <= 4) return "name";
+  return "unknown";
+}
+
 function parseCardText(text) {
   const result = { email: "", phone: "", website: "", fullName: "", jobTitle: "", company: "", address: "" };
+
   const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   if (emailMatch) result.email = emailMatch[0];
+
   const phoneMatch = text.match(/(\+?\d[\d\-\.\s\(\)]{7,}\d)/);
   if (phoneMatch) result.phone = phoneMatch[0].trim();
+
   const websiteMatch = text.match(/((https?:\/\/)?(www\.)?[a-zA-Z0-9-]+\.(com|net|org|io|co)(\/[^\s]*)?)/i);
   if (websiteMatch && !websiteMatch[0].includes("@")) result.website = websiteMatch[0];
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  if (lines.length > 0) result.fullName = lines[0];
-  if (lines.length > 1) result.jobTitle = lines[1];
-  if (lines.length > 2) result.company = lines[2];
-  const addressLine = lines.find(l => /\d{1,5}\s+\w+/.test(l) && l !== result.fullName);
-  if (addressLine) result.address = addressLine;
+
+  // Remaining lines, stripped of anything already captured as email/phone/website
+  const usedFragments = [result.email, result.phone, result.website].filter(Boolean);
+  const lines = text.split("\n")
+    .map(l => l.trim())
+    .filter(Boolean)
+    .filter(l => !usedFragments.some(frag => frag && l.includes(frag)));
+
+  const remaining = [];
+  lines.forEach(line => {
+    const type = classifyLine(line);
+    if (type === "unknown") { remaining.push(line); return; }
+    if (type === "jobTitle" && !result.jobTitle) result.jobTitle = line;
+    else if (type === "company" && !result.company) result.company = line;
+    else if (type === "address" && !result.address) result.address = line;
+    else if (type === "name" && !result.fullName) result.fullName = line;
+    else remaining.push(line);
+  });
+
+  // Fallback: if no name was confidently identified, use the first
+  // unclassified line (usually the most prominent text on a card).
+  if (!result.fullName && remaining.length > 0) result.fullName = remaining.shift();
+  // Fallback: if no company found, try the next unclassified line.
+  if (!result.company && remaining.length > 0) result.company = remaining.shift();
+
   return result;
 }
 
@@ -597,6 +676,7 @@ function renderContacts() {
         ${c.event ? `<span class="inline-block mt-1 text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">${escapeHtml(c.event)}</span>` : ""}
       </div>
       <div class="flex flex-col gap-1">
+        <button onclick="openViewModal('${c.id}')" class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg">View</button>
         <button onclick="openEditModal('${c.id}')" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg">Edit</button>
         <button onclick="openDeleteModal('${c.id}')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg">Delete</button>
       </div>
@@ -608,6 +688,33 @@ function escapeHtml(str) {
   return (str || "").toString()
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// ---------------- VIEW ----------------
+let viewingId = null;
+function openViewModal(id) {
+  const c = allContacts.find(x => x.id === id);
+  if (!c) return;
+  viewingId = id;
+  document.getElementById("viewImg").src = c.imageUrl;
+  document.getElementById("viewFullName").textContent = c.fullName || "—";
+  document.getElementById("viewJobTitle").textContent = c.jobTitle || "—";
+  document.getElementById("viewCompany").textContent = c.company || "—";
+  document.getElementById("viewEmail").textContent = c.email || "—";
+  document.getElementById("viewPhone").textContent = c.phone || "—";
+  document.getElementById("viewWebsite").textContent = c.website || "—";
+  document.getElementById("viewAddress").textContent = c.address || "—";
+  document.getElementById("viewEvent").textContent = c.event || "—";
+  document.getElementById("viewModal").classList.remove("hidden");
+}
+function closeViewModal() {
+  document.getElementById("viewModal").classList.add("hidden");
+  viewingId = null;
+}
+function editFromView() {
+  const id = viewingId;
+  closeViewModal();
+  openEditModal(id);
 }
 
 // ---------------- EDIT ----------------
